@@ -1,0 +1,1544 @@
+--========================================================
+-- ONE SCRIPT ADMIN / TROLL PANEL + TEMP POSITION SAVES
+-- EINZIGES SCRIPT -> ServerScriptService
+--========================================================
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remote = ReplicatedStorage:FindFirstChild("OneScriptAdminRemote")
+
+if not Remote then
+	Remote = Instance.new("RemoteEvent")
+	Remote.Name = "OneScriptAdminRemote"
+	Remote.Parent = ReplicatedStorage
+end
+
+-- Temporäre Positionsspeicher:
+-- [Player] = { [Slot] = CFrame }
+local savedPositions = {}
+
+local function getPlayer(name)
+	if typeof(name) ~= "string" then
+		return nil
+	end
+
+	name = name:lower()
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Name:lower() == name
+			or plr.DisplayName:lower() == name then
+			return plr
+		end
+	end
+
+	return nil
+end
+
+local function getRoot(plr)
+	if not plr or not plr.Character then
+		return nil
+	end
+
+	return plr.Character:FindFirstChild("HumanoidRootPart")
+end
+
+Remote.OnServerEvent:Connect(function(sender, command, data)
+
+	if typeof(command) ~= "string" then
+		return
+	end
+
+	data = typeof(data) == "table" and data or {}
+
+	--------------------------------------------------------
+	-- SAVE POSITION
+	--------------------------------------------------------
+
+	if command == "SavePosition" then
+
+		local slot = tonumber(data.Slot)
+
+		if not slot or slot < 1 or slot > 5 then
+			return
+		end
+
+		local root = getRoot(sender)
+
+		if root then
+
+			savedPositions[sender] =
+				savedPositions[sender] or {}
+
+			savedPositions[sender][slot] =
+				root.CFrame
+
+			Remote:FireClient(sender, "PositionSaved", {
+				Slot = slot
+			})
+		end
+
+		return
+	end
+
+	--------------------------------------------------------
+	-- TELEPORT TO SAVED POSITION
+	--------------------------------------------------------
+
+	if command == "TeleportPosition" then
+
+		local slot = tonumber(data.Slot)
+
+		if not slot or slot < 1 or slot > 5 then
+			return
+		end
+
+		local saved =
+			savedPositions[sender]
+
+		if not saved then
+			return
+		end
+
+		local position =
+			saved[slot]
+
+		if not position then
+			return
+		end
+
+		local root = getRoot(sender)
+
+		if root then
+			root.CFrame =
+				position + Vector3.new(0,3,0)
+		end
+
+		return
+	end
+
+	--------------------------------------------------------
+	-- DELETE POSITION
+	--------------------------------------------------------
+
+	if command == "ClearPosition" then
+
+		local slot = tonumber(data.Slot)
+
+		if not slot or slot < 1 or slot > 5 then
+			return
+		end
+
+		if savedPositions[sender] then
+			savedPositions[sender][slot] = nil
+		end
+
+		Remote:FireClient(sender, "PositionCleared", {
+			Slot = slot
+		})
+
+		return
+	end
+
+	--------------------------------------------------------
+	-- SERVER MESSAGE
+	--------------------------------------------------------
+
+	if command == "Message" then
+
+		local message =
+			tostring(data.Message or "")
+
+		if message == "" then
+			return
+		end
+
+		message =
+			message:sub(1,200)
+
+		Remote:FireAllClients(
+			"ServerMessage",
+			{
+				Message = message,
+				From = sender.DisplayName
+			}
+		)
+
+		return
+	end
+
+	--------------------------------------------------------
+	-- TARGET
+	--------------------------------------------------------
+
+	local target =
+		getPlayer(data.Target)
+
+	if not target then
+		return
+	end
+
+	--------------------------------------------------------
+	-- KILL
+	--------------------------------------------------------
+
+	if command == "Kill" then
+
+		local character =
+			target.Character
+
+		if character then
+
+			local humanoid =
+				character:FindFirstChildOfClass(
+					"Humanoid"
+				)
+
+			if humanoid then
+				humanoid.Health = 0
+			end
+		end
+
+	--------------------------------------------------------
+	-- KICK
+	--------------------------------------------------------
+
+	elseif command == "Kick" then
+
+		if target ~= sender then
+			target:Kick(
+				"Du wurdest aus dem Server gekickt."
+			)
+		end
+
+	--------------------------------------------------------
+	-- RESPAWN
+	--------------------------------------------------------
+
+	elseif command == "Respawn" then
+
+		target:LoadCharacter()
+
+	--------------------------------------------------------
+	-- FIRE
+	--------------------------------------------------------
+
+	elseif command == "Fire" then
+
+		local character =
+			target.Character
+
+		if character then
+
+			local oldFire =
+				character:FindFirstChild(
+					"TrollFire"
+				)
+
+			if oldFire then
+				oldFire:Destroy()
+				return
+			end
+
+			local fire =
+				Instance.new("Fire")
+
+			fire.Name =
+				"TrollFire"
+
+			fire.Heat = 10
+			fire.Size = 8
+			fire.Parent = character
+
+			task.delay(10,function()
+
+				if fire and fire.Parent then
+					fire:Destroy()
+				end
+
+			end)
+		end
+
+	--------------------------------------------------------
+	-- JUMPSCARE
+	--------------------------------------------------------
+
+	elseif command == "Jumpscare" then
+
+		Remote:FireClient(
+			target,
+			"Jumpscare"
+		)
+
+	end
+end)
+
+------------------------------------------------------------
+-- DELETE SAVES WHEN PLAYER LEAVES
+------------------------------------------------------------
+
+Players.PlayerRemoving:Connect(function(player)
+	savedPositions[player] = nil
+end)
+
+------------------------------------------------------------
+-- CLIENT
+------------------------------------------------------------
+
+local ClientSource = [==[
+
+local Players =
+	game:GetService("Players")
+
+local ReplicatedStorage =
+	game:GetService("ReplicatedStorage")
+
+local RunService =
+	game:GetService("RunService")
+
+local UserInputService =
+	game:GetService("UserInputService")
+
+local player =
+	Players.LocalPlayer
+
+local Remote =
+	ReplicatedStorage:WaitForChild(
+		"OneScriptAdminRemote"
+	)
+
+local walkSpeed = 16
+local jumpPower = 50
+local flySpeed = 60
+
+local flying = false
+local flyConnection
+local bodyVelocity
+
+local selectedPlayer
+
+------------------------------------------------------------
+-- GUI
+------------------------------------------------------------
+
+local gui =
+	Instance.new("ScreenGui")
+
+gui.Name =
+	"OneScriptAdminPanel"
+
+gui.ResetOnSpawn =
+	false
+
+gui.Parent =
+	player:WaitForChild("PlayerGui")
+
+------------------------------------------------------------
+-- OPEN BUTTON
+------------------------------------------------------------
+
+local openButton =
+	Instance.new("TextButton")
+
+openButton.Size =
+	UDim2.fromOffset(55,55)
+
+openButton.Position =
+	UDim2.fromOffset(20,20)
+
+openButton.BackgroundColor3 =
+	Color3.fromRGB(90,65,220)
+
+openButton.Text =
+	"⚡"
+
+openButton.TextSize =
+	26
+
+openButton.TextColor3 =
+	Color3.new(1,1,1)
+
+openButton.Visible =
+	false
+
+openButton.Parent =
+	gui
+
+Instance.new("UICorner",openButton)
+	.CornerRadius =
+	UDim.new(1,0)
+
+------------------------------------------------------------
+-- MAIN
+------------------------------------------------------------
+
+local main =
+	Instance.new("Frame")
+
+main.Size =
+	UDim2.fromOffset(700,520)
+
+main.Position =
+	UDim2.new(
+		0.5,-350,
+		0.5,-260
+	)
+
+main.BackgroundColor3 =
+	Color3.fromRGB(19,19,27)
+
+main.BorderSizePixel =
+	0
+
+main.Parent =
+	gui
+
+Instance.new("UICorner",main)
+	.CornerRadius =
+	UDim.new(0,15)
+
+------------------------------------------------------------
+-- TITLE
+------------------------------------------------------------
+
+local title =
+	Instance.new("TextLabel")
+
+title.Size =
+	UDim2.new(1,-70,0,55)
+
+title.Position =
+	UDim2.fromOffset(20,5)
+
+title.BackgroundTransparency =
+	1
+
+title.Text =
+	"⚡ ADMIN / TROLL PANEL"
+
+title.TextColor3 =
+	Color3.new(1,1,1)
+
+title.TextSize =
+	23
+
+title.Font =
+	Enum.Font.GothamBold
+
+title.TextXAlignment =
+	Enum.TextXAlignment.Left
+
+title.Parent =
+	main
+
+local close =
+	Instance.new("TextButton")
+
+close.Size =
+	UDim2.fromOffset(42,42)
+
+close.Position =
+	UDim2.new(1,-52,0,10)
+
+close.BackgroundColor3 =
+	Color3.fromRGB(175,50,60)
+
+close.Text =
+	"×"
+
+close.TextSize =
+	25
+
+close.TextColor3 =
+	Color3.new(1,1,1)
+
+close.Parent =
+	main
+
+Instance.new("UICorner",close)
+	.CornerRadius =
+	UDim.new(0,9)
+
+close.MouseButton1Click:Connect(function()
+
+	main.Visible =
+		false
+
+	openButton.Visible =
+		true
+
+end)
+
+openButton.MouseButton1Click:Connect(function()
+
+	main.Visible =
+		true
+
+	openButton.Visible =
+		false
+
+end)
+
+------------------------------------------------------------
+-- HELPERS
+------------------------------------------------------------
+
+local function label(text,x,y,w,h)
+
+	local obj =
+		Instance.new("TextLabel")
+
+	obj.Size =
+		UDim2.fromOffset(w,h)
+
+	obj.Position =
+		UDim2.fromOffset(x,y)
+
+	obj.BackgroundTransparency =
+		1
+
+	obj.Text =
+		text
+
+	obj.TextColor3 =
+		Color3.fromRGB(225,225,235)
+
+	obj.TextSize =
+		14
+
+	obj.Font =
+		Enum.Font.GothamBold
+
+	obj.TextXAlignment =
+		Enum.TextXAlignment.Left
+
+	obj.Parent =
+		main
+
+	return obj
+end
+
+local function button(text,x,y,w,h,color)
+
+	local obj =
+		Instance.new("TextButton")
+
+	obj.Size =
+		UDim2.fromOffset(w,h)
+
+	obj.Position =
+		UDim2.fromOffset(x,y)
+
+	obj.BackgroundColor3 =
+		color or
+		Color3.fromRGB(45,45,58)
+
+	obj.BorderSizePixel =
+		0
+
+	obj.Text =
+		text
+
+	obj.TextColor3 =
+		Color3.new(1,1,1)
+
+	obj.TextSize =
+		13
+
+	obj.Font =
+		Enum.Font.GothamBold
+
+	obj.Parent =
+		main
+
+	Instance.new("UICorner",obj)
+		.CornerRadius =
+		UDim.new(0,8)
+
+	return obj
+end
+
+local function textbox(
+	placeholder,
+	value,
+	x,y,w,h
+)
+
+	local obj =
+		Instance.new("TextBox")
+
+	obj.Size =
+		UDim2.fromOffset(w,h)
+
+	obj.Position =
+		UDim2.fromOffset(x,y)
+
+	obj.BackgroundColor3 =
+		Color3.fromRGB(34,34,45)
+
+	obj.BorderSizePixel =
+		0
+
+	obj.PlaceholderText =
+		placeholder
+
+	obj.Text =
+		value or ""
+
+	obj.TextColor3 =
+		Color3.new(1,1,1)
+
+	obj.TextSize =
+		13
+
+	obj.Font =
+		Enum.Font.Gotham
+
+	obj.ClearTextOnFocus =
+		false
+
+	obj.Parent =
+		main
+
+	Instance.new("UICorner",obj)
+		.CornerRadius =
+		UDim.new(0,8)
+
+	return obj
+end
+
+------------------------------------------------------------
+-- MOVEMENT
+------------------------------------------------------------
+
+label(
+	"MOVEMENT",
+	25,65,
+	280,25
+)
+
+local flyButton =
+	button(
+		"🪽 FLY: OFF",
+	25,100,
+	275,42,
+	Color3.fromRGB(65,65,85)
+	)
+
+local speedBox =
+	textbox(
+		"WalkSpeed",
+		"16",
+		25,150,
+	130,38
+	)
+
+local speedSet =
+	button(
+		"SET SPEED",
+	165,150,
+	135,38,
+	Color3.fromRGB(55,105,205)
+	)
+
+local jumpBox =
+	textbox(
+		"JumpPower",
+		"50",
+		25,195,
+	130,38
+	)
+
+local jumpSet =
+	button(
+		"SET JUMP",
+	165,195,
+	135,38,
+	Color3.fromRGB(55,105,205)
+	)
+
+local flyBox =
+	textbox(
+		"Fly Speed",
+		"60",
+		25,240,
+	130,38
+	)
+
+local flySet =
+	button(
+		"SET FLY SPEED",
+	165,240,
+	135,38,
+	Color3.fromRGB(55,105,205)
+	)
+
+------------------------------------------------------------
+-- POSITION SAVES
+------------------------------------------------------------
+
+label(
+	"📍 TEMPORÄRE POSITIONEN",
+	25,295,
+	275,25
+)
+
+local selectedSlot = 1
+
+local slotButtons = {}
+
+for i = 1,5 do
+
+	local x =
+		25 + ((i-1) % 3) * 92
+
+	local y =
+		330 + math.floor((i-1) / 3) * 42
+
+	local b =
+		button(
+			"Slot "..i,
+			x,y,
+			82,35,
+			Color3.fromRGB(55,55,72)
+		)
+
+	slotButtons[i] =
+		b
+
+	b.MouseButton1Click:Connect(function()
+
+		selectedSlot =
+			i
+
+		for n,btn in pairs(slotButtons) do
+
+			if n == i then
+				btn.BackgroundColor3 =
+					Color3.fromRGB(70,130,220)
+			else
+				btn.BackgroundColor3 =
+					Color3.fromRGB(55,55,72)
+			end
+
+		end
+
+	end)
+
+end
+
+local saveButton =
+	button(
+		"📍 SAVE",
+	25,425,
+	82,35,
+	Color3.fromRGB(50,145,85)
+	)
+
+local teleportButton =
+	button(
+		"↩ GO",
+	117,425,
+	82,35,
+	Color3.fromRGB(55,105,205)
+	)
+
+local clearButton =
+	button(
+		"🗑 CLEAR",
+	209,425,
+	82,35,
+	Color3.fromRGB(150,55,60)
+	)
+
+saveButton.MouseButton1Click:Connect(function()
+
+	Remote:FireServer(
+		"SavePosition",
+		{
+			Slot = selectedSlot
+		}
+	)
+
+end)
+
+teleportButton.MouseButton1Click:Connect(function()
+
+	Remote:FireServer(
+		"TeleportPosition",
+		{
+			Slot = selectedSlot
+		}
+	)
+
+end)
+
+clearButton.MouseButton1Click:Connect(function()
+
+	Remote:FireServer(
+		"ClearPosition",
+		{
+			Slot = selectedSlot
+		}
+	)
+
+end)
+
+------------------------------------------------------------
+-- PLAYER LIST
+------------------------------------------------------------
+
+label(
+	"TROLL / PLAYERS",
+	325,65,
+	330,25
+)
+
+local selectedLabel =
+	label(
+		"Selected: Niemand",
+		325,90,
+		330,25
+	)
+
+local playerList =
+	Instance.new("ScrollingFrame")
+
+playerList.Size =
+	UDim2.fromOffset(350,145)
+
+playerList.Position =
+	UDim2.fromOffset(325,120)
+
+playerList.BackgroundColor3 =
+	Color3.fromRGB(28,28,38)
+
+playerList.BorderSizePixel =
+	0
+
+playerList.ScrollBarThickness =
+	5
+
+playerList.Parent =
+	main
+
+Instance.new("UICorner",playerList)
+	.CornerRadius =
+	UDim.new(0,8)
+
+local layout =
+	Instance.new("UIListLayout")
+
+layout.Padding =
+	UDim.new(0,4)
+
+layout.Parent =
+	playerList
+
+local function refreshPlayers()
+
+	for _,child in ipairs(
+		playerList:GetChildren()
+	) do
+
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+
+	end
+
+	for _,target in ipairs(
+		Players:GetPlayers()
+	) do
+
+		local b =
+			Instance.new("TextButton")
+
+		b.Size =
+			UDim2.new(1,-8,0,35)
+
+		b.BackgroundColor3 =
+			Color3.fromRGB(45,45,58)
+
+		b.BorderSizePixel =
+			0
+
+		b.Text =
+			target.DisplayName ..
+			"  @" ..
+			target.Name
+
+		b.TextColor3 =
+			Color3.new(1,1,1)
+
+		b.TextSize =
+			12
+
+		b.Font =
+			Enum.Font.Gotham
+
+		b.Parent =
+			playerList
+
+		Instance.new("UICorner",b)
+			.CornerRadius =
+			UDim.new(0,6)
+
+		b.MouseButton1Click:Connect(function()
+
+			selectedPlayer =
+				target
+
+			selectedLabel.Text =
+				"Selected: " ..
+				target.DisplayName
+
+		end)
+	end
+end
+
+Players.PlayerAdded:Connect(
+	refreshPlayers
+)
+
+Players.PlayerRemoving:Connect(
+	refreshPlayers
+)
+
+refreshPlayers()
+
+------------------------------------------------------------
+-- TROLL BUTTONS
+------------------------------------------------------------
+
+local function troll(
+	text,x,y,command,color
+)
+
+	local b =
+		button(
+			text,
+			x,y,
+			165,38,
+			color
+		)
+
+	b.MouseButton1Click:Connect(function()
+
+		if not selectedPlayer then
+			return
+		end
+
+		Remote:FireServer(
+			command,
+			{
+				Target =
+					selectedPlayer.Name
+			}
+		)
+
+	end)
+
+end
+
+troll(
+	"💀 KILL",
+	325,280,
+	"Kill",
+	Color3.fromRGB(155,45,55)
+)
+
+troll(
+	"👢 KICK",
+	510,280,
+	"Kick",
+	Color3.fromRGB(180,65,45)
+)
+
+troll(
+	"🔥 FIRE",
+	325,325,
+	"Fire",
+	Color3.fromRGB(200,95,25)
+)
+
+troll(
+	"😱 JUMPSCARE",
+	510,325,
+	"Jumpscare",
+	Color3.fromRGB(125,55,175)
+)
+
+troll(
+	"🔄 RESPAWN",
+	325,370,
+	"Respawn",
+	Color3.fromRGB(45,130,80)
+)
+
+------------------------------------------------------------
+-- SERVER MESSAGE
+------------------------------------------------------------
+
+local messageBox =
+	textbox(
+		"Server-Nachricht...",
+		"",
+		510,370,
+		165,38
+	)
+
+local messageButton =
+	button(
+		"📢 SEND MESSAGE",
+	325,415,
+	165,38,
+	Color3.fromRGB(70,95,200)
+	)
+
+messageButton.MouseButton1Click:Connect(function()
+
+	if messageBox.Text == "" then
+		return
+	end
+
+	Remote:FireServer(
+		"Message",
+		{
+			Message =
+				messageBox.Text
+		}
+	)
+
+	messageBox.Text = ""
+
+end)
+
+------------------------------------------------------------
+-- MOVEMENT
+------------------------------------------------------------
+
+local function getHumanoid()
+
+	local character =
+		player.Character
+
+	if not character then
+		return nil
+	end
+
+	return character:
+		FindFirstChildOfClass(
+			"Humanoid"
+		)
+end
+
+speedSet.MouseButton1Click:Connect(function()
+
+	local value =
+		tonumber(speedBox.Text)
+
+	if value then
+
+		walkSpeed =
+			math.clamp(
+				value,0,500
+			)
+
+		local hum =
+			getHumanoid()
+
+		if hum then
+			hum.WalkSpeed =
+				walkSpeed
+		end
+	end
+end)
+
+jumpSet.MouseButton1Click:Connect(function()
+
+	local value =
+		tonumber(jumpBox.Text)
+
+	if value then
+
+		jumpPower =
+			math.clamp(
+				value,0,500
+			)
+
+		local hum =
+			getHumanoid()
+
+		if hum then
+
+			hum.UseJumpPower =
+				true
+
+			hum.JumpPower =
+				jumpPower
+
+		end
+	end
+end)
+
+flySet.MouseButton1Click:Connect(function()
+
+	local value =
+		tonumber(flyBox.Text)
+
+	if value then
+
+		flySpeed =
+			math.clamp(
+				value,1,500
+			)
+
+	end
+end)
+
+------------------------------------------------------------
+-- FLY
+------------------------------------------------------------
+
+local function stopFly()
+
+	flying =
+		false
+
+	if flyConnection then
+
+		flyConnection:
+			Disconnect()
+
+		flyConnection =
+			nil
+
+	end
+
+	if bodyVelocity then
+
+		bodyVelocity:
+			Destroy()
+
+		bodyVelocity =
+			nil
+
+	end
+
+	flyButton.Text =
+		"🪽 FLY: OFF"
+
+	flyButton.BackgroundColor3 =
+		Color3.fromRGB(
+			65,65,85
+		)
+
+end
+
+local function startFly()
+
+	local character =
+		player.Character
+
+	if not character then
+		return
+	end
+
+	local root =
+		character:
+		FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if not root then
+		return
+	end
+
+	flying =
+		true
+
+	bodyVelocity =
+		Instance.new(
+			"BodyVelocity"
+		)
+
+	bodyVelocity.MaxForce =
+		Vector3.new(
+			100000,
+			100000,
+			100000
+		)
+
+	bodyVelocity.Velocity =
+		Vector3.zero
+
+	bodyVelocity.Parent =
+		root
+
+	flyButton.Text =
+		"🪽 FLY: ON"
+
+	flyButton.BackgroundColor3 =
+		Color3.fromRGB(
+			50,150,85
+		)
+
+	flyConnection =
+		RunService.RenderStepped:
+		Connect(function()
+
+			if not flying
+				or not root.Parent then
+
+				stopFly()
+				return
+
+			end
+
+			local camera =
+				workspace.CurrentCamera
+
+			local direction =
+				Vector3.zero
+
+			if UserInputService:
+				IsKeyDown(
+					Enum.KeyCode.W
+				) then
+
+				direction +=
+					camera.CFrame.LookVector
+
+			end
+
+			if UserInputService:
+				IsKeyDown(
+					Enum.KeyCode.S
+				) then
+
+				direction -=
+					camera.CFrame.LookVector
+
+			end
+
+			if UserInputService:
+				IsKeyDown(
+					Enum.KeyCode.A
+				) then
+
+				direction -=
+					camera.CFrame.RightVector
+
+			end
+
+			if UserInputService:
+				IsKeyDown(
+					Enum.KeyCode.D
+				) then
+
+				direction +=
+					camera.CFrame.RightVector
+
+			end
+
+			if UserInputService:
+				IsKeyDown(
+					Enum.KeyCode.Space
+				) then
+
+				direction +=
+					Vector3.new(0,1,0)
+
+			end
+
+			if UserInputService:
+				IsKeyDown(
+					Enum.KeyCode.LeftControl
+				) then
+
+				direction -=
+					Vector3.new(0,1,0)
+
+			end
+
+			if direction.Magnitude > 0 then
+
+				direction =
+					direction.Unit *
+					flySpeed
+
+			end
+
+			bodyVelocity.Velocity =
+				direction
+
+		end)
+
+end
+
+flyButton.MouseButton1Click:Connect(function()
+
+	if flying then
+		stopFly()
+	else
+		startFly()
+	end
+
+end)
+
+------------------------------------------------------------
+-- CHARACTER
+------------------------------------------------------------
+
+player.CharacterAdded:Connect(function(character)
+
+	task.wait(0.5)
+
+	local hum =
+		character:
+		FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	if hum then
+
+		hum.WalkSpeed =
+			walkSpeed
+
+		hum.UseJumpPower =
+			true
+
+		hum.JumpPower =
+			jumpPower
+
+	end
+
+	if flying then
+		stopFly()
+	end
+
+end)
+
+------------------------------------------------------------
+-- SERVER EVENTS
+------------------------------------------------------------
+
+Remote.OnClientEvent:Connect(
+	function(event,data)
+
+		if event ==
+			"PositionSaved" then
+
+			local slot =
+				data.Slot
+
+			if slotButtons[slot] then
+
+				slotButtons[slot].Text =
+					"📍 Slot "..slot.." ✓"
+
+			end
+
+		elseif event ==
+			"PositionCleared" then
+
+			local slot =
+				data.Slot
+
+			if slotButtons[slot] then
+
+				slotButtons[slot].Text =
+					"Slot "..slot
+
+			end
+
+		elseif event ==
+			"ServerMessage" then
+
+			local notification =
+				Instance.new(
+					"TextLabel"
+				)
+
+			notification.Size =
+				UDim2.new(
+					0.65,0,
+					0,65
+				)
+
+			notification.Position =
+				UDim2.new(
+					0.175,0,
+					0.08,0
+				)
+
+			notification.BackgroundColor3 =
+				Color3.fromRGB(
+					25,25,35
+				)
+
+			notification.BorderSizePixel =
+				0
+
+			notification.Text =
+				"📢 " ..
+				tostring(
+					data.Message
+				)
+
+			notification.TextColor3 =
+				Color3.new(1,1,1)
+
+			notification.TextSize =
+				17
+
+			notification.Font =
+				Enum.Font.GothamBold
+
+			notification.TextWrapped =
+				true
+
+			notification.ZIndex =
+				100
+
+			notification.Parent =
+				gui
+
+			Instance.new(
+				"UICorner",
+				notification
+			).CornerRadius =
+				UDim.new(0,12)
+
+			task.delay(
+				5,
+				function()
+
+					if notification then
+						notification:Destroy()
+					end
+
+				end
+			)
+
+		elseif event ==
+			"Jumpscare" then
+
+			local scare =
+				Instance.new("Frame")
+
+			scare.Size =
+				UDim2.fromScale(
+					1,1
+				)
+
+			scare.BackgroundColor3 =
+				Color3.fromRGB(
+					130,0,0
+				)
+
+			scare.BorderSizePixel =
+				0
+
+			scare.ZIndex =
+				500
+
+			scare.Parent =
+				gui
+
+			local face =
+				Instance.new(
+					"TextLabel"
+				)
+
+			face.Size =
+				UDim2.fromScale(
+					1,1
+				)
+
+			face.BackgroundTransparency =
+				1
+
+			face.Text =
+				"😱"
+
+			face.TextSize =
+				170
+
+			face.ZIndex =
+				501
+
+			face.Parent =
+				scare
+
+			task.wait(0.8)
+
+			if scare then
+				scare:Destroy()
+			end
+
+		end
+
+	end
+)
+
+]==]
+
+------------------------------------------------------------
+-- INSTALL CLIENT AUTOMATICALLY
+------------------------------------------------------------
+
+local function install(player)
+
+	local playerScripts =
+		player:WaitForChild(
+			"PlayerScripts"
+		)
+
+	local old =
+		playerScripts:
+		FindFirstChild(
+			"OneScriptAdminClient"
+		)
+
+	if old then
+		old:Destroy()
+	end
+
+	local client =
+		Instance.new(
+			"LocalScript"
+		)
+
+	client.Name =
+		"OneScriptAdminClient"
+
+	client.Source =
+		ClientSource
+
+	client.Parent =
+		playerScripts
+end
+
+Players.PlayerAdded:Connect(function(player)
+
+	task.spawn(function()
+		install(player)
+	end)
+
+end)
+
+for _,player in ipairs(
+	Players:GetPlayers()
+) do
+
+	task.spawn(function()
+		install(player)
+	end)
+
+end
+
+print(
+	"ONE SCRIPT ADMIN PANEL + POSITION SAVES LOADED"
+)
