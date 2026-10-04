@@ -1,16 +1,34 @@
 --========================================================
--- ONE SCRIPT ADMIN / TROLL PANEL
+-- ONE SCRIPT ADMIN / TROLL PANEL - ENHANCED EDITION
 -- SINGLE LOCALSCRIPT VERSION
 --
 -- Put ONLY this LocalScript in:
 -- StarterPlayer > StarterPlayerScripts
 --
--- Everyone gets access.
+-- Includes:
+-- • Draggable main panel
+-- • Draggable floating open icon
+-- • Startup loading animation
+-- • UI SFX
+-- • Hover/click animations
+-- • Modern gradients + strokes
+-- • Animated notifications
+-- • Fly / speed / jump
+-- • Position slots
+-- • Player selector
+-- • Local troll effects
+-- • RightShift shortcut
+--
+-- NOTE:
+-- This is still a LocalScript. Actions against other players
+-- are client-side only unless your game has server RemoteEvents.
 --========================================================
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -32,6 +50,19 @@ local selectedSlot = 1
 
 local savedPositions = {}
 
+local PURPLE = Color3.fromRGB(105, 75, 255)
+local PURPLE_DARK = Color3.fromRGB(65, 45, 150)
+local BLUE = Color3.fromRGB(65, 125, 255)
+local GREEN = Color3.fromRGB(55, 185, 105)
+local RED = Color3.fromRGB(190, 55, 70)
+local ORANGE = Color3.fromRGB(220, 105, 35)
+local BG = Color3.fromRGB(14, 14, 22)
+local PANEL = Color3.fromRGB(20, 20, 31)
+local CARD = Color3.fromRGB(27, 27, 41)
+local CARD_HOVER = Color3.fromRGB(38, 38, 56)
+local TEXT = Color3.fromRGB(245, 245, 255)
+local SUBTEXT = Color3.fromRGB(155, 155, 180)
+
 ------------------------------------------------------------
 -- GUI
 ------------------------------------------------------------
@@ -40,261 +71,1107 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "OneScriptAdminPanel"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
 ------------------------------------------------------------
--- OPEN BUTTON
+-- SOUND SYSTEM
+------------------------------------------------------------
+
+local SOUND_IDS = {
+	Click = "rbxassetid://6895079853",
+	Hover = "rbxassetid://6895079853",
+	Open = "rbxassetid://6895079853",
+	Close = "rbxassetid://6895079853",
+	Success = "rbxassetid://6895079853",
+	Error = "rbxassetid://6895079853",
+	Select = "rbxassetid://6895079853",
+}
+
+local function playSound(name, volume, speed)
+
+	local id = SOUND_IDS[name]
+
+	if not id then
+		return
+	end
+
+	local sound = Instance.new("Sound")
+	sound.SoundId = id
+	sound.Volume = volume or 0.35
+	sound.PlaybackSpeed = speed or 1
+	sound.Parent = SoundService
+
+	sound:Play()
+
+	sound.Ended:Connect(function()
+		sound:Destroy()
+	end)
+end
+
+------------------------------------------------------------
+-- TWEEN HELPERS
+------------------------------------------------------------
+
+local function tween(object, properties, duration, style, direction)
+
+	local info = TweenInfo.new(
+		duration or 0.2,
+		style or Enum.EasingStyle.Quint,
+		direction or Enum.EasingDirection.Out
+	)
+
+	local t = TweenService:Create(object, info, properties)
+	t:Play()
+
+	return t
+end
+
+------------------------------------------------------------
+-- SHADOW HELPER
+------------------------------------------------------------
+
+local function addShadow(parent, transparency)
+
+	local shadow = Instance.new("ImageLabel")
+
+	shadow.Name = "Shadow"
+	shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+	shadow.Position = UDim2.fromScale(0.5, 0.5)
+	shadow.Size = UDim2.new(1, 35, 1, 35)
+	shadow.BackgroundTransparency = 1
+	shadow.Image = "rbxassetid://1316045217"
+	shadow.ImageColor3 = Color3.new(0, 0, 0)
+	shadow.ImageTransparency = transparency or 0.55
+	shadow.ScaleType = Enum.ScaleType.Slice
+	shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+	shadow.ZIndex = parent.ZIndex - 1
+	shadow.Parent = parent
+
+	return shadow
+end
+
+------------------------------------------------------------
+-- DRAG SYSTEM
+------------------------------------------------------------
+
+local function makeDraggable(handle, object)
+
+	local dragging = false
+	local dragStart
+	local startPosition
+	local dragInput
+
+	local function update(input)
+
+		local delta = input.Position - dragStart
+
+		object.Position = UDim2.new(
+			startPosition.X.Scale,
+			startPosition.X.Offset + delta.X,
+			startPosition.Y.Scale,
+			startPosition.Y.Offset + delta.Y
+		)
+	end
+
+	handle.InputBegan:Connect(function(input)
+
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			dragging = true
+			dragStart = input.Position
+			startPosition = object.Position
+
+			playSound("Click", 0.15, 1.1)
+
+			input.Changed:Connect(function()
+
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+
+			end)
+		end
+
+	end)
+
+	handle.InputChanged:Connect(function(input)
+
+		if input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			dragInput = input
+		end
+
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+
+		if input == dragInput and dragging then
+			update(input)
+		end
+
+	end)
+end
+
+------------------------------------------------------------
+-- OPEN FLOATING BUTTON
 ------------------------------------------------------------
 
 local openButton = Instance.new("TextButton")
-openButton.Size = UDim2.fromOffset(55,55)
-openButton.Position = UDim2.fromOffset(20,20)
-openButton.BackgroundColor3 = Color3.fromRGB(90,65,220)
+
+openButton.Name = "OpenButton"
+openButton.Size = UDim2.fromOffset(62, 62)
+openButton.Position = UDim2.fromOffset(24, 24)
+openButton.BackgroundColor3 = PURPLE
 openButton.BorderSizePixel = 0
 openButton.Text = "⚡"
-openButton.TextSize = 26
-openButton.TextColor3 = Color3.new(1,1,1)
+openButton.TextSize = 28
+openButton.TextColor3 = TEXT
+openButton.Font = Enum.Font.GothamBold
 openButton.Visible = false
+openButton.AutoButtonColor = false
 openButton.ZIndex = 100
 openButton.Parent = gui
 
 local openCorner = Instance.new("UICorner")
-openCorner.CornerRadius = UDim.new(1,0)
+openCorner.CornerRadius = UDim.new(1, 0)
 openCorner.Parent = openButton
 
+local openStroke = Instance.new("UIStroke")
+openStroke.Color = Color3.fromRGB(160, 135, 255)
+openStroke.Thickness = 2
+openStroke.Transparency = 0.25
+openStroke.Parent = openButton
+
+local openGradient = Instance.new("UIGradient")
+openGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(130, 95, 255)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(70, 70, 220)),
+})
+openGradient.Rotation = 45
+openGradient.Parent = openButton
+
+addShadow(openButton, 0.4)
+
+makeDraggable(openButton, openButton)
+
 ------------------------------------------------------------
--- MAIN
+-- OPEN BUTTON ANIMATION
+------------------------------------------------------------
+
+local openOriginalSize = openButton.Size
+
+openButton.MouseEnter:Connect(function()
+
+	tween(
+		openButton,
+		{Size = UDim2.fromOffset(68, 68)},
+		0.15
+	)
+
+	playSound("Hover", 0.08, 1.25)
+end)
+
+openButton.MouseLeave:Connect(function()
+
+	tween(
+		openButton,
+		{Size = openOriginalSize},
+		0.15
+	)
+end)
+
+------------------------------------------------------------
+-- MAIN PANEL
 ------------------------------------------------------------
 
 local main = Instance.new("Frame")
-main.Size = UDim2.fromOffset(700,520)
-main.Position = UDim2.new(0.5,-350,0.5,-260)
-main.BackgroundColor3 = Color3.fromRGB(19,19,27)
+
+main.Name = "Main"
+main.Size = UDim2.fromOffset(760, 555)
+main.Position = UDim2.new(0.5, -380, 0.5, -277)
+main.BackgroundColor3 = PANEL
 main.BorderSizePixel = 0
+main.ClipsDescendants = true
 main.Parent = gui
 
 local mainCorner = Instance.new("UICorner")
-mainCorner.CornerRadius = UDim.new(0,15)
+mainCorner.CornerRadius = UDim.new(0, 18)
 mainCorner.Parent = main
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(75, 75, 105)
+mainStroke.Transparency = 0.25
+mainStroke.Thickness = 1
+mainStroke.Parent = main
+
+addShadow(main, 0.42)
+
+------------------------------------------------------------
+-- BACKGROUND GRADIENT
+------------------------------------------------------------
+
+local backgroundGradient = Instance.new("UIGradient")
+
+backgroundGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 24, 38)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(17, 17, 28)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 12, 20)),
+})
+
+backgroundGradient.Rotation = 135
+backgroundGradient.Parent = main
+
+------------------------------------------------------------
+-- HEADER
+------------------------------------------------------------
+
+local header = Instance.new("Frame")
+
+header.Name = "Header"
+header.Size = UDim2.new(1, 0, 0, 70)
+header.BackgroundColor3 = Color3.fromRGB(27, 27, 43)
+header.BorderSizePixel = 0
+header.ZIndex = 5
+header.Parent = main
+
+local headerGradient = Instance.new("UIGradient")
+
+headerGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(55, 43, 105)),
+	ColorSequenceKeypoint.new(0.55, Color3.fromRGB(30, 30, 52)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(22, 22, 35)),
+})
+
+headerGradient.Rotation = 25
+headerGradient.Parent = header
+
+local headerCorner = Instance.new("UICorner")
+headerCorner.CornerRadius = UDim.new(0, 18)
+headerCorner.Parent = header
+
+------------------------------------------------------------
+-- HEADER ICON
+------------------------------------------------------------
+
+local icon = Instance.new("TextLabel")
+
+icon.Size = UDim2.fromOffset(45, 45)
+icon.Position = UDim2.fromOffset(14, 12)
+icon.BackgroundColor3 = PURPLE
+icon.BorderSizePixel = 0
+icon.Text = "⚡"
+icon.TextSize = 23
+icon.TextColor3 = TEXT
+icon.Font = Enum.Font.GothamBold
+icon.ZIndex = 7
+icon.Parent = header
+
+local iconCorner = Instance.new("UICorner")
+iconCorner.CornerRadius = UDim.new(0, 12)
+iconCorner.Parent = icon
 
 ------------------------------------------------------------
 -- TITLE
 ------------------------------------------------------------
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1,-70,0,55)
-title.Position = UDim2.fromOffset(20,5)
+
+title.Size = UDim2.new(1, -170, 0, 30)
+title.Position = UDim2.fromOffset(72, 9)
 title.BackgroundTransparency = 1
-title.Text = "⚡ ADMIN / TROLL PANEL"
-title.TextColor3 = Color3.new(1,1,1)
-title.TextSize = 23
+title.Text = "ADMIN / TROLL PANEL"
+title.TextColor3 = TEXT
+title.TextSize = 21
 title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = main
+title.ZIndex = 7
+title.Parent = header
+
+local subtitle = Instance.new("TextLabel")
+
+subtitle.Size = UDim2.new(1, -170, 0, 20)
+subtitle.Position = UDim2.fromOffset(73, 38)
+subtitle.BackgroundTransparency = 1
+subtitle.Text = "One Script • Enhanced Edition"
+subtitle.TextColor3 = SUBTEXT
+subtitle.TextSize = 11
+subtitle.Font = Enum.Font.Gotham
+subtitle.TextXAlignment = Enum.TextXAlignment.Left
+subtitle.ZIndex = 7
+subtitle.Parent = header
 
 ------------------------------------------------------------
--- CLOSE
+-- CLOSE BUTTON
 ------------------------------------------------------------
 
 local close = Instance.new("TextButton")
-close.Size = UDim2.fromOffset(42,42)
-close.Position = UDim2.new(1,-52,0,10)
-close.BackgroundColor3 = Color3.fromRGB(175,50,60)
+
+close.Size = UDim2.fromOffset(40, 40)
+close.Position = UDim2.new(1, -52, 0, 15)
+close.BackgroundColor3 = Color3.fromRGB(55, 45, 65)
 close.BorderSizePixel = 0
 close.Text = "×"
 close.TextSize = 25
-close.TextColor3 = Color3.new(1,1,1)
-close.Parent = main
+close.TextColor3 = TEXT
+close.Font = Enum.Font.GothamBold
+close.AutoButtonColor = false
+close.ZIndex = 10
+close.Parent = header
 
 local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0,9)
+closeCorner.CornerRadius = UDim.new(0, 11)
 closeCorner.Parent = close
 
-close.MouseButton1Click:Connect(function()
-	main.Visible = false
-	openButton.Visible = true
+------------------------------------------------------------
+-- CLOSE HOVER
+------------------------------------------------------------
+
+close.MouseEnter:Connect(function()
+
+	tween(
+		close,
+		{
+			BackgroundColor3 = RED,
+			Rotation = 5
+		},
+		0.15
+	)
+
+	playSound("Hover", 0.08, 1.2)
 end)
 
-openButton.MouseButton1Click:Connect(function()
-	main.Visible = true
-	openButton.Visible = false
+close.MouseLeave:Connect(function()
+
+	tween(
+		close,
+		{
+			BackgroundColor3 = Color3.fromRGB(55,45,65),
+			Rotation = 0
+		},
+		0.15
+	)
 end)
 
 ------------------------------------------------------------
--- HELPERS
+-- DRAG HEADER
 ------------------------------------------------------------
 
-local function label(text,x,y,w,h)
+makeDraggable(header, main)
+
+------------------------------------------------------------
+-- CONTENT
+------------------------------------------------------------
+
+local content = Instance.new("Frame")
+
+content.Size = UDim2.new(1, -28, 1, -82)
+content.Position = UDim2.fromOffset(14, 78)
+content.BackgroundTransparency = 1
+content.Parent = main
+
+------------------------------------------------------------
+-- HELPER: LABEL
+------------------------------------------------------------
+
+local function label(text, x, y, w, h)
 
 	local obj = Instance.new("TextLabel")
 
-	obj.Size = UDim2.fromOffset(w,h)
-	obj.Position = UDim2.fromOffset(x,y)
+	obj.Size = UDim2.fromOffset(w, h)
+	obj.Position = UDim2.fromOffset(x, y)
 	obj.BackgroundTransparency = 1
 	obj.Text = text
-	obj.TextColor3 = Color3.fromRGB(225,225,235)
-	obj.TextSize = 14
+	obj.TextColor3 = TEXT
+	obj.TextSize = 13
 	obj.Font = Enum.Font.GothamBold
 	obj.TextXAlignment = Enum.TextXAlignment.Left
-	obj.Parent = main
+	obj.Parent = content
 
 	return obj
 end
 
-local function button(text,x,y,w,h,color)
+------------------------------------------------------------
+-- HELPER: CARD
+------------------------------------------------------------
+
+local function card(x, y, w, h)
+
+	local obj = Instance.new("Frame")
+
+	obj.Size = UDim2.fromOffset(w, h)
+	obj.Position = UDim2.fromOffset(x, y)
+	obj.BackgroundColor3 = CARD
+	obj.BorderSizePixel = 0
+	obj.Parent = content
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = obj
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(65, 65, 90)
+	stroke.Transparency = 0.55
+	stroke.Thickness = 1
+	stroke.Parent = obj
+
+	return obj
+end
+
+------------------------------------------------------------
+-- HELPER: BUTTON
+------------------------------------------------------------
+
+local function button(text, x, y, w, h, color)
 
 	local obj = Instance.new("TextButton")
 
-	obj.Size = UDim2.fromOffset(w,h)
-	obj.Position = UDim2.fromOffset(x,y)
-	obj.BackgroundColor3 = color or Color3.fromRGB(45,45,58)
+	obj.Size = UDim2.fromOffset(w, h)
+	obj.Position = UDim2.fromOffset(x, y)
+	obj.BackgroundColor3 = color or Color3.fromRGB(45, 45, 60)
 	obj.BorderSizePixel = 0
 	obj.Text = text
-	obj.TextColor3 = Color3.new(1,1,1)
-	obj.TextSize = 13
+	obj.TextColor3 = TEXT
+	obj.TextSize = 12
 	obj.Font = Enum.Font.GothamBold
-	obj.Parent = main
+	obj.AutoButtonColor = false
+	obj.Parent = content
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0,8)
+	corner.CornerRadius = UDim.new(0, 9)
 	corner.Parent = obj
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(100, 100, 130)
+	stroke.Transparency = 0.75
+	stroke.Parent = obj
+
+	local normalColor = obj.BackgroundColor3
+
+	obj.MouseEnter:Connect(function()
+
+		tween(
+			obj,
+			{
+				BackgroundColor3 = CARD_HOVER,
+				Size = UDim2.fromOffset(w + 2, h + 2)
+			},
+			0.12
+		)
+
+		playSound("Hover", 0.07, 1.3)
+	end)
+
+	obj.MouseLeave:Connect(function()
+
+		tween(
+			obj,
+			{
+				BackgroundColor3 = normalColor,
+				Size = UDim2.fromOffset(w, h)
+			},
+			0.12
+		)
+	end)
+
+	obj.MouseButton1Down:Connect(function()
+
+		tween(
+			obj,
+			{Size = UDim2.fromOffset(w - 2, h - 2)},
+			0.08
+		)
+
+		playSound("Click", 0.15, 1)
+	end)
 
 	return obj
 end
 
-local function textbox(placeholder,value,x,y,w,h)
+------------------------------------------------------------
+-- HELPER: TEXTBOX
+------------------------------------------------------------
+
+local function textbox(placeholder, value, x, y, w, h)
 
 	local obj = Instance.new("TextBox")
 
-	obj.Size = UDim2.fromOffset(w,h)
-	obj.Position = UDim2.fromOffset(x,y)
-	obj.BackgroundColor3 = Color3.fromRGB(34,34,45)
+	obj.Size = UDim2.fromOffset(w, h)
+	obj.Position = UDim2.fromOffset(x, y)
+	obj.BackgroundColor3 = Color3.fromRGB(21, 21, 32)
 	obj.BorderSizePixel = 0
 	obj.PlaceholderText = placeholder
+	obj.PlaceholderColor3 = Color3.fromRGB(105, 105, 130)
 	obj.Text = value or ""
-	obj.TextColor3 = Color3.new(1,1,1)
-	obj.TextSize = 13
+	obj.TextColor3 = TEXT
+	obj.TextSize = 12
 	obj.Font = Enum.Font.Gotham
 	obj.ClearTextOnFocus = false
-	obj.Parent = main
+	obj.Parent = content
 
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0,8)
+	corner.CornerRadius = UDim.new(0, 9)
 	corner.Parent = obj
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(70, 70, 100)
+	stroke.Transparency = 0.4
+	stroke.Parent = obj
+
+	obj.Focused:Connect(function()
+
+		tween(
+			stroke,
+			{
+				Color = PURPLE,
+				Transparency = 0
+			},
+			0.15
+		)
+	end)
+
+	obj.FocusLost:Connect(function()
+
+		tween(
+			stroke,
+			{
+				Color = Color3.fromRGB(70, 70, 100),
+				Transparency = 0.4
+			},
+			0.15
+		)
+	end)
 
 	return obj
 end
 
 ------------------------------------------------------------
--- MOVEMENT
+-- MOVEMENT CARD
 ------------------------------------------------------------
 
-label("MOVEMENT",25,65,280,25)
+local movementCard = card(0, 0, 330, 265)
 
-local flyButton = button(
-	"🪽 FLY: OFF",
-	25,100,275,42,
-	Color3.fromRGB(65,65,85)
+local movementTitle = label(
+	"⚡  MOVEMENT",
+	15, 13, 280, 25
 )
+
+movementTitle.Parent = movementCard
+movementTitle.Position = UDim2.fromOffset(15, 13)
+
+------------------------------------------------------------
+-- FLY
+------------------------------------------------------------
+
+local flyButton = Instance.new("TextButton")
+
+flyButton.Size = UDim2.fromOffset(300, 40)
+flyButton.Position = UDim2.fromOffset(15, 48)
+flyButton.BackgroundColor3 = Color3.fromRGB(48, 48, 68)
+flyButton.BorderSizePixel = 0
+flyButton.Text = "🪽  FLY  •  OFF"
+flyButton.TextColor3 = TEXT
+flyButton.TextSize = 12
+flyButton.Font = Enum.Font.GothamBold
+flyButton.AutoButtonColor = false
+flyButton.Parent = movementCard
+
+local flyCorner = Instance.new("UICorner")
+flyCorner.CornerRadius = UDim.new(0, 9)
+flyCorner.Parent = flyButton
+
+------------------------------------------------------------
+-- MOVEMENT TEXTBOXES
+------------------------------------------------------------
 
 local speedBox = textbox(
 	"WalkSpeed",
 	"16",
-	25,150,130,38
+	15, 95, 140, 36
 )
 
 local speedSet = button(
 	"SET SPEED",
-	165,150,135,38,
-	Color3.fromRGB(55,105,205)
+	165, 95, 150, 36,
+	BLUE
 )
 
 local jumpBox = textbox(
 	"JumpPower",
 	"50",
-	25,195,130,38
+	15, 140, 140, 36
 )
 
 local jumpSet = button(
 	"SET JUMP",
-	165,195,135,38,
-	Color3.fromRGB(55,105,205)
+	165, 140, 150, 36,
+	BLUE
 )
 
 local flyBox = textbox(
 	"Fly Speed",
 	"60",
-	25,240,130,38
+	15, 185, 140, 36
 )
 
 local flySet = button(
 	"SET FLY SPEED",
-	165,240,135,38,
-	Color3.fromRGB(55,105,205)
+	165, 185, 150, 36,
+	BLUE
 )
 
 ------------------------------------------------------------
--- POSITION SAVES
+-- POSITION CARD
 ------------------------------------------------------------
 
-label(
-	"📍 TEMPORÄRE POSITIONEN",
-	25,295,275,25
+local positionCard = card(0, 278, 330, 245)
+
+local positionTitle = label(
+	"📍  POSITION SLOTS",
+	15, 13, 280, 25
 )
+
+positionTitle.Parent = positionCard
+positionTitle.Position = UDim2.fromOffset(15, 13)
 
 local slotButtons = {}
 
-for i = 1,5 do
+for i = 1, 5 do
 
-	local x = 25 + ((i-1) % 3) * 92
-	local y = 330 + math.floor((i-1) / 3) * 42
+	local x = 15 + ((i - 1) % 3) * 100
+	local y = 50 + math.floor((i - 1) / 3) * 42
 
-	local b = button(
-		"Slot "..i,
-		x,y,82,35,
-		Color3.fromRGB(55,55,72)
-	)
+	local b = Instance.new("TextButton")
+
+	b.Size = UDim2.fromOffset(90, 34)
+	b.Position = UDim2.fromOffset(x, y)
+	b.BackgroundColor3 = Color3.fromRGB(46, 46, 63)
+	b.BorderSizePixel = 0
+	b.Text = "Slot " .. i
+	b.TextColor3 = TEXT
+	b.TextSize = 11
+	b.Font = Enum.Font.GothamBold
+	b.AutoButtonColor = false
+	b.Parent = positionCard
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = b
 
 	slotButtons[i] = b
+
+	b.MouseEnter:Connect(function()
+
+		tween(
+			b,
+			{BackgroundColor3 = Color3.fromRGB(60,60,82)},
+			0.12
+		)
+
+	end)
+
+	b.MouseLeave:Connect(function()
+
+		if selectedSlot == i then
+			tween(
+				b,
+				{BackgroundColor3 = PURPLE},
+				0.12
+			)
+		else
+			tween(
+				b,
+				{BackgroundColor3 = Color3.fromRGB(46,46,63)},
+				0.12
+			)
+		end
+
+	end)
 
 	b.MouseButton1Click:Connect(function()
 
 		selectedSlot = i
 
-		for n,btn in pairs(slotButtons) do
+		for n, btn in pairs(slotButtons) do
 
 			if n == i then
-				btn.BackgroundColor3 =
-					Color3.fromRGB(70,130,220)
+				btn.BackgroundColor3 = PURPLE
 			else
 				btn.BackgroundColor3 =
-					Color3.fromRGB(55,55,72)
+					Color3.fromRGB(46,46,63)
 			end
 
 		end
+
+		playSound("Select", 0.18, 1.1)
 	end)
 end
 
-slotButtons[1].BackgroundColor3 =
-	Color3.fromRGB(70,130,220)
+slotButtons[1].BackgroundColor3 = PURPLE
 
 local saveButton = button(
 	"📍 SAVE",
-	25,425,82,35,
-	Color3.fromRGB(50,145,85)
+	15, 135, 90, 36,
+	GREEN
 )
 
 local teleportButton = button(
 	"↩ GO",
-	117,425,82,35,
-	Color3.fromRGB(55,105,205)
+	115, 135, 90, 36,
+	BLUE
 )
 
 local clearButton = button(
 	"🗑 CLEAR",
-	209,425,82,35,
-	Color3.fromRGB(150,55,60)
+	215, 135, 90, 36,
+	RED
 )
+
+------------------------------------------------------------
+-- RIGHT PLAYER CARD
+------------------------------------------------------------
+
+local playerCard = card(345, 0, 383, 523)
+
+local playerTitle = label(
+	"👥  TROLL / PLAYERS",
+	15, 13, 330, 25
+)
+
+playerTitle.Parent = playerCard
+playerTitle.Position = UDim2.fromOffset(15, 13)
+
+------------------------------------------------------------
+-- SELECTED PLAYER
+------------------------------------------------------------
+
+local selectedLabel = Instance.new("TextLabel")
+
+selectedLabel.Size = UDim2.fromOffset(350, 27)
+selectedLabel.Position = UDim2.fromOffset(15, 43)
+selectedLabel.BackgroundColor3 = Color3.fromRGB(22,22,34)
+selectedLabel.BorderSizePixel = 0
+selectedLabel.Text = "Selected: Nobody"
+selectedLabel.TextColor3 = SUBTEXT
+selectedLabel.TextSize = 11
+selectedLabel.Font = Enum.Font.Gotham
+selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
+selectedLabel.Parent = playerCard
+
+local selectedPadding = Instance.new("UIPadding")
+selectedPadding.PaddingLeft = UDim.new(0, 10)
+selectedPadding.Parent = selectedLabel
+
+local selectedCorner = Instance.new("UICorner")
+selectedCorner.CornerRadius = UDim.new(0, 8)
+selectedCorner.Parent = selectedLabel
+
+------------------------------------------------------------
+-- PLAYER LIST
+------------------------------------------------------------
+
+local playerList = Instance.new("ScrollingFrame")
+
+playerList.Size = UDim2.fromOffset(353, 140)
+playerList.Position = UDim2.fromOffset(15, 78)
+playerList.BackgroundColor3 = Color3.fromRGB(17,17,27)
+playerList.BorderSizePixel = 0
+playerList.ScrollBarThickness = 4
+playerList.ScrollBarImageColor3 = PURPLE
+playerList.CanvasSize = UDim2.new()
+playerList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+playerList.Parent = playerCard
+
+local playerCorner = Instance.new("UICorner")
+playerCorner.CornerRadius = UDim.new(0, 9)
+playerCorner.Parent = playerList
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 5)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = playerList
+
+local playerPadding = Instance.new("UIPadding")
+playerPadding.PaddingTop = UDim.new(0, 5)
+playerPadding.PaddingLeft = UDim.new(0, 5)
+playerPadding.PaddingRight = UDim.new(0, 5)
+playerPadding.Parent = playerList
+
+------------------------------------------------------------
+-- REFRESH PLAYERS
+------------------------------------------------------------
+
+local function refreshPlayers()
+
+	for _, child in ipairs(playerList:GetChildren()) do
+
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+
+	end
+
+	for _, target in ipairs(Players:GetPlayers()) do
+
+		local b = Instance.new("TextButton")
+
+		b.Size = UDim2.new(1, -10, 0, 34)
+		b.BackgroundColor3 = Color3.fromRGB(38,38,53)
+		b.BorderSizePixel = 0
+		b.Text = "  " .. target.DisplayName .. "  @" .. target.Name
+		b.TextColor3 = TEXT
+		b.TextSize = 11
+		b.Font = Enum.Font.Gotham
+		b.TextXAlignment = Enum.TextXAlignment.Left
+		b.AutoButtonColor = false
+		b.Parent = playerList
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 7)
+		corner.Parent = b
+
+		b.MouseEnter:Connect(function()
+
+			tween(
+				b,
+				{BackgroundColor3 = Color3.fromRGB(55,55,76)},
+				0.12
+			)
+		end)
+
+		b.MouseLeave:Connect(function()
+
+			if selectedPlayer == target then
+
+				tween(
+					b,
+					{BackgroundColor3 = Color3.fromRGB(65,55,105)},
+					0.12
+				)
+
+			else
+
+				tween(
+					b,
+					{BackgroundColor3 = Color3.fromRGB(38,38,53)},
+					0.12
+				)
+
+			end
+		end)
+
+		b.MouseButton1Click:Connect(function()
+
+			selectedPlayer = target
+
+			selectedLabel.Text =
+				"Selected:  " .. target.DisplayName
+
+			selectedLabel.TextColor3 = Color3.fromRGB(190,175,255)
+
+			for _, other in ipairs(playerList:GetChildren()) do
+
+				if other:IsA("TextButton") then
+					other.BackgroundColor3 =
+						Color3.fromRGB(38,38,53)
+				end
+
+			end
+
+			b.BackgroundColor3 =
+				Color3.fromRGB(65,55,105)
+
+			playSound("Select", 0.2, 1.15)
+		end)
+	end
+end
+
+Players.PlayerAdded:Connect(refreshPlayers)
+
+Players.PlayerRemoving:Connect(function(target)
+
+	if selectedPlayer == target then
+
+		selectedPlayer = nil
+
+		selectedLabel.Text =
+			"Selected: Nobody"
+
+		selectedLabel.TextColor3 = SUBTEXT
+
+	end
+
+	refreshPlayers()
+end)
+
+refreshPlayers()
+
+------------------------------------------------------------
+-- TROLL BUTTONS
+------------------------------------------------------------
+
+local killButton = button(
+	"💀  KILL",
+	15, 233, 170, 38,
+	RED
+)
+
+killButton.Parent = playerCard
+killButton.Position = UDim2.fromOffset(15, 233)
+
+local kickButton = button(
+	"👢  KICK",
+	198, 233, 170, 38,
+	ORANGE
+)
+
+kickButton.Parent = playerCard
+kickButton.Position = UDim2.fromOffset(198, 233)
+
+local fireButton = button(
+	"🔥  FIRE",
+	15, 278, 170, 38,
+	Color3.fromRGB(200,90,25)
+)
+
+fireButton.Parent = playerCard
+fireButton.Position = UDim2.fromOffset(15, 278)
+
+local scareButton = button(
+	"😱  JUMPSCARE",
+	198, 278, 170, 38,
+	Color3.fromRGB(125,65,185)
+)
+
+scareButton.Parent = playerCard
+scareButton.Position = UDim2.fromOffset(198, 278)
+
+local respawnButton = button(
+	"🔄  RESPAWN",
+	15, 323, 170, 38,
+	GREEN
+)
+
+respawnButton.Parent = playerCard
+respawnButton.Position = UDim2.fromOffset(15, 323)
+
+------------------------------------------------------------
+-- MESSAGE
+------------------------------------------------------------
+
+local messageBox = textbox(
+	"Message...",
+	"",
+	15, 380, 220, 38
+)
+
+messageBox.Parent = playerCard
+messageBox.Position = UDim2.fromOffset(15, 380)
+
+local messageButton = button(
+	"📢  SEND",
+	245, 380, 123, 38,
+	BLUE
+)
+
+messageButton.Parent = playerCard
+messageButton.Position = UDim2.fromOffset(245, 380)
+
+------------------------------------------------------------
+-- NOTIFICATION SYSTEM
+------------------------------------------------------------
+
+local notificationContainer = Instance.new("Frame")
+
+notificationContainer.Size = UDim2.fromOffset(340, 250)
+notificationContainer.Position = UDim2.new(1, -360, 0, 25)
+notificationContainer.BackgroundTransparency = 1
+notificationContainer.ZIndex = 200
+notificationContainer.Parent = gui
+
+local notificationLayout = Instance.new("UIListLayout")
+
+notificationLayout.Padding = UDim.new(0, 8)
+notificationLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+notificationLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+notificationLayout.Parent = notificationContainer
+
+local function notify(message, color)
+
+	local notification = Instance.new("Frame")
+
+	notification.Size = UDim2.fromOffset(0, 52)
+	notification.BackgroundColor3 = Color3.fromRGB(25,25,38)
+	notification.BorderSizePixel = 0
+	notification.ZIndex = 201
+	notification.Parent = notificationContainer
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = notification
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = color or PURPLE
+	stroke.Thickness = 1.5
+	stroke.Transparency = 0.2
+	stroke.Parent = notification
+
+	local accent = Instance.new("Frame")
+
+	accent.Size = UDim2.fromOffset(4, 52)
+	accent.BackgroundColor3 = color or PURPLE
+	accent.BorderSizePixel = 0
+	accent.ZIndex = 202
+	accent.Parent = notification
+
+	local accentCorner = Instance.new("UICorner")
+	accentCorner.CornerRadius = UDim.new(1,0)
+	accentCorner.Parent = accent
+
+	local text = Instance.new("TextLabel")
+
+	text.Size = UDim2.new(1, -25, 1, 0)
+	text.Position = UDim2.fromOffset(15, 0)
+	text.BackgroundTransparency = 1
+	text.Text = message
+	text.TextColor3 = TEXT
+	text.TextSize = 12
+	text.Font = Enum.Font.GothamBold
+	text.TextXAlignment = Enum.TextXAlignment.Left
+	text.ZIndex = 203
+	text.Parent = notification
+
+	tween(
+		notification,
+		{Size = UDim2.fromOffset(330, 52)},
+		0.3,
+		Enum.EasingStyle.Back
+	)
+
+	task.delay(3.2, function()
+
+		if notification and notification.Parent then
+
+			tween(
+				notification,
+				{
+					Size = UDim2.fromOffset(0, 52)
+				},
+				0.25
+			)
+
+			task.wait(0.3)
+
+			if notification then
+				notification:Destroy()
+			end
+
+		end
+
+	end)
+end
 
 ------------------------------------------------------------
 -- POSITION FUNCTIONS
@@ -316,14 +1193,22 @@ saveButton.MouseButton1Click:Connect(function()
 	local root = getRoot()
 
 	if not root then
+		notify("Character not ready.", RED)
+		playSound("Error", 0.2)
 		return
 	end
 
 	savedPositions[selectedSlot] = root.CFrame
 
 	slotButtons[selectedSlot].Text =
-		"📍 Slot "..selectedSlot.." ✓"
+		"📍 Slot " .. selectedSlot .. " ✓"
 
+	notify(
+		"Position saved to Slot " .. selectedSlot,
+		GREEN
+	)
+
+	playSound("Success", 0.25, 1.15)
 end)
 
 teleportButton.MouseButton1Click:Connect(function()
@@ -338,12 +1223,25 @@ teleportButton.MouseButton1Click:Connect(function()
 		savedPositions[selectedSlot]
 
 	if not position then
+
+		notify(
+			"Slot " .. selectedSlot .. " is empty.",
+			RED
+		)
+
+		playSound("Error", 0.2)
 		return
 	end
 
 	root.CFrame =
-		position + Vector3.new(0,3,0)
+		position + Vector3.new(0, 3, 0)
 
+	notify(
+		"Teleported to Slot " .. selectedSlot,
+		BLUE
+	)
+
+	playSound("Success", 0.2, 1.3)
 end)
 
 clearButton.MouseButton1Click:Connect(function()
@@ -351,120 +1249,15 @@ clearButton.MouseButton1Click:Connect(function()
 	savedPositions[selectedSlot] = nil
 
 	slotButtons[selectedSlot].Text =
-		"Slot "..selectedSlot
+		"Slot " .. selectedSlot
 
+	notify(
+		"Slot " .. selectedSlot .. " cleared.",
+		ORANGE
+	)
+
+	playSound("Click", 0.2, 0.8)
 end)
-
-------------------------------------------------------------
--- PLAYER LIST
-------------------------------------------------------------
-
-label(
-	"TROLL / PLAYERS",
-	325,65,330,25
-)
-
-local selectedLabel = label(
-	"Selected: Niemand",
-	325,90,330,25
-)
-
-local playerList = Instance.new("ScrollingFrame")
-
-playerList.Size =
-	UDim2.fromOffset(350,145)
-
-playerList.Position =
-	UDim2.fromOffset(325,120)
-
-playerList.BackgroundColor3 =
-	Color3.fromRGB(28,28,38)
-
-playerList.BorderSizePixel = 0
-playerList.ScrollBarThickness = 5
-playerList.Parent = main
-
-local playerCorner = Instance.new("UICorner")
-playerCorner.CornerRadius = UDim.new(0,8)
-playerCorner.Parent = playerList
-
-local layout = Instance.new("UIListLayout")
-layout.Padding = UDim.new(0,4)
-layout.Parent = playerList
-
-------------------------------------------------------------
--- REFRESH PLAYERS
-------------------------------------------------------------
-
-local function refreshPlayers()
-
-	for _,child in ipairs(playerList:GetChildren()) do
-
-		if child:IsA("TextButton") then
-			child:Destroy()
-		end
-
-	end
-
-	for _,target in ipairs(Players:GetPlayers()) do
-
-		local b = Instance.new("TextButton")
-
-		b.Size =
-			UDim2.new(1,-8,0,35)
-
-		b.BackgroundColor3 =
-			Color3.fromRGB(45,45,58)
-
-		b.BorderSizePixel = 0
-
-		b.Text =
-			target.DisplayName ..
-			"  @" ..
-			target.Name
-
-		b.TextColor3 =
-			Color3.new(1,1,1)
-
-		b.TextSize = 12
-		b.Font = Enum.Font.Gotham
-
-		b.Parent = playerList
-
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0,6)
-		corner.Parent = b
-
-		b.MouseButton1Click:Connect(function()
-
-			selectedPlayer = target
-
-			selectedLabel.Text =
-				"Selected: " ..
-				target.DisplayName
-
-		end)
-	end
-end
-
-Players.PlayerAdded:Connect(refreshPlayers)
-
-Players.PlayerRemoving:Connect(function(target)
-
-	if selectedPlayer == target then
-
-		selectedPlayer = nil
-
-		selectedLabel.Text =
-			"Selected: Niemand"
-
-	end
-
-	refreshPlayers()
-
-end)
-
-refreshPlayers()
 
 ------------------------------------------------------------
 -- LOCAL KILL
@@ -473,7 +1266,7 @@ refreshPlayers()
 local function localKill(target)
 
 	if not target or not target.Character then
-		return
+		return false
 	end
 
 	local humanoid =
@@ -481,21 +1274,90 @@ local function localKill(target)
 
 	if humanoid then
 
-		-- Only affects what this client can control/observe.
-		-- Server-authoritative kill requires a RemoteEvent.
 		humanoid.Health = 0
+		return true
 
 	end
+
+	return false
 end
 
+killButton.MouseButton1Click:Connect(function()
+
+	if not selectedPlayer then
+
+		notify(
+			"Select a player first.",
+			RED
+		)
+
+		return
+	end
+
+	if localKill(selectedPlayer) then
+
+		notify(
+			"Kill applied to " ..
+				selectedPlayer.DisplayName,
+			RED
+		)
+
+		playSound("Success", 0.3, 0.8)
+
+	else
+
+		notify(
+			"Unable to affect player.",
+			RED
+		)
+
+	end
+end)
+
 ------------------------------------------------------------
--- FIRE EFFECT
+-- KICK
+------------------------------------------------------------
+
+kickButton.MouseButton1Click:Connect(function()
+
+	if selectedPlayer == player then
+
+		playSound("Error", 0.25, 0.8)
+
+		player:Kick(
+			"You kicked yourself."
+		)
+
+		return
+	end
+
+	if selectedPlayer then
+
+		notify(
+			"Kick requires a server script.",
+			ORANGE
+		)
+
+		playSound("Error", 0.2)
+
+	else
+
+		notify(
+			"Select a player first.",
+			RED
+		)
+
+	end
+end)
+
+------------------------------------------------------------
+-- FIRE
 ------------------------------------------------------------
 
 local function firePlayer(target)
 
 	if not target or not target.Character then
-		return
+		return false
 	end
 
 	local character = target.Character
@@ -505,7 +1367,8 @@ local function firePlayer(target)
 
 	if oldFire then
 		oldFire:Destroy()
-		return
+
+		return true
 	end
 
 	local fire = Instance.new("Fire")
@@ -513,16 +1376,43 @@ local function firePlayer(target)
 	fire.Name = "TrollFire"
 	fire.Heat = 10
 	fire.Size = 8
+	fire.Color = Color3.fromRGB(255, 120, 25)
+	fire.SecondaryColor = Color3.fromRGB(255, 220, 70)
 	fire.Parent = character
 
-	task.delay(10,function()
+	task.delay(10, function()
 
 		if fire and fire.Parent then
 			fire:Destroy()
 		end
 
 	end)
+
+	return true
 end
+
+fireButton.MouseButton1Click:Connect(function()
+
+	if not selectedPlayer then
+
+		notify(
+			"Select a player first.",
+			RED
+		)
+
+		return
+	end
+
+	if firePlayer(selectedPlayer) then
+
+		notify(
+			"🔥 Fire applied!",
+			ORANGE
+		)
+
+		playSound("Success", 0.25, 1.3)
+	end
+end)
 
 ------------------------------------------------------------
 -- JUMPSCARE
@@ -534,55 +1424,89 @@ local function jumpscare(target)
 		return
 	end
 
-	-- This one-script version displays the scare
-	-- on the current client.
-
 	local scare = Instance.new("Frame")
 
-	scare.Size =
-		UDim2.fromScale(1,1)
-
-	scare.Position =
-		UDim2.fromScale(0,0)
-
-	scare.BackgroundColor3 =
-		Color3.fromRGB(130,0,0)
-
+	scare.Size = UDim2.fromScale(1.3, 1.3)
+	scare.Position = UDim2.fromScale(-0.15, -0.15)
+	scare.BackgroundColor3 = Color3.fromRGB(100, 0, 15)
 	scare.BorderSizePixel = 0
-
 	scare.ZIndex = 500
-
 	scare.Parent = gui
+
+	local gradient = Instance.new("UIGradient")
+
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 20, 35)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(45, 0, 5)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 0)),
+	})
+
+	gradient.Parent = scare
 
 	local face = Instance.new("TextLabel")
 
-	face.Size =
-		UDim2.fromScale(1,1)
-
+	face.Size = UDim2.fromScale(1,1)
 	face.BackgroundTransparency = 1
-
 	face.Text = "😱"
-
-	face.TextSize = 170
-
-	face.TextColor3 =
-		Color3.new(1,1,1)
-
+	face.TextSize = 180
+	face.TextColor3 = TEXT
 	face.ZIndex = 501
-
 	face.Parent = scare
 
-	task.delay(0.8,function()
+	tween(
+		face,
+		{
+			TextSize = 230,
+			Rotation = 8
+		},
+		0.15,
+		Enum.EasingStyle.Back
+	)
+
+	playSound("Error", 0.5, 0.55)
+
+	task.delay(0.65, function()
 
 		if scare then
-			scare:Destroy()
+
+			tween(
+				scare,
+				{BackgroundTransparency = 1},
+				0.2
+			)
+
+			task.wait(0.2)
+
+			if scare then
+				scare:Destroy()
+			end
 		end
 
 	end)
 end
 
+scareButton.MouseButton1Click:Connect(function()
+
+	if selectedPlayer then
+		jumpscare(selectedPlayer)
+
+		notify(
+			"😱 Jumpscare triggered!",
+			Color3.fromRGB(145,70,210)
+		)
+
+	else
+
+		notify(
+			"Select a player first.",
+			RED
+		)
+
+	end
+end)
+
 ------------------------------------------------------------
--- LOCAL RESPAWN
+-- RESPAWN
 ------------------------------------------------------------
 
 local function respawnSelf()
@@ -601,149 +1525,130 @@ local function respawnSelf()
 	end
 end
 
-------------------------------------------------------------
--- TROLL BUTTONS
-------------------------------------------------------------
-
-local killButton = button(
-	"💀 KILL",
-	325,280,165,38,
-	Color3.fromRGB(155,45,55)
-)
-
-killButton.MouseButton1Click:Connect(function()
-
-	if selectedPlayer then
-		localKill(selectedPlayer)
-	end
-
-end)
-
-local kickButton = button(
-	"👢 KICK",
-	510,280,165,38,
-	Color3.fromRGB(180,65,45)
-)
-
-kickButton.MouseButton1Click:Connect(function()
-
-	if selectedPlayer == player then
-
-		player:Kick(
-			"You kicked yourself."
-		)
-
-	end
-
-end)
-
-local fireButton = button(
-	"🔥 FIRE",
-	325,325,165,38,
-	Color3.fromRGB(200,95,25)
-)
-
-fireButton.MouseButton1Click:Connect(function()
-
-	if selectedPlayer then
-		firePlayer(selectedPlayer)
-	end
-
-end)
-
-local scareButton = button(
-	"😱 JUMPSCARE",
-	510,325,165,38,
-	Color3.fromRGB(125,55,175)
-)
-
-scareButton.MouseButton1Click:Connect(function()
-
-	if selectedPlayer then
-		jumpscare(selectedPlayer)
-	end
-
-end)
-
-local respawnButton = button(
-	"🔄 RESPAWN",
-	325,370,165,38,
-	Color3.fromRGB(45,130,80)
-)
-
 respawnButton.MouseButton1Click:Connect(function()
 
 	respawnSelf()
 
+	notify(
+		"Respawning...",
+		GREEN
+	)
+
+	playSound("Success", 0.25, 0.9)
 end)
 
 ------------------------------------------------------------
 -- MESSAGE
 ------------------------------------------------------------
 
-local messageBox = textbox(
-	"Message...",
-	"",
-	510,370,165,38
-)
-
-local messageButton = button(
-	"📢 SEND MESSAGE",
-	325,415,165,38,
-	Color3.fromRGB(70,95,200)
-)
-
 messageButton.MouseButton1Click:Connect(function()
 
 	local message = messageBox.Text
 
 	if message == "" then
+
+		notify(
+			"Enter a message first.",
+			RED
+		)
+
 		return
 	end
 
-	-- One-script version:
-	-- display the message locally.
-
 	local notification =
-		Instance.new("TextLabel")
+		Instance.new("Frame")
 
 	notification.Size =
-		UDim2.new(0.65,0,0,65)
+		UDim2.new(0.6, 0, 0, 65)
 
 	notification.Position =
-		UDim2.new(0.175,0,0.08,0)
+		UDim2.new(0.2, 0, 0.07, 0)
 
 	notification.BackgroundColor3 =
-		Color3.fromRGB(25,25,35)
+		Color3.fromRGB(22,22,34)
 
 	notification.BorderSizePixel = 0
-
-	notification.Text =
-		"📢 " .. message
-
-	notification.TextColor3 =
-		Color3.new(1,1,1)
-
-	notification.TextSize = 17
-	notification.Font = Enum.Font.GothamBold
-	notification.TextWrapped = true
-	notification.ZIndex = 100
+	notification.ZIndex = 300
 	notification.Parent = gui
 
 	local corner =
 		Instance.new("UICorner")
 
 	corner.CornerRadius =
-		UDim.new(0,12)
+		UDim.new(0, 13)
 
 	corner.Parent = notification
 
+	local stroke =
+		Instance.new("UIStroke")
+
+	stroke.Color = PURPLE
+	stroke.Thickness = 2
+	stroke.Transparency = 0.3
+	stroke.Parent = notification
+
+	local msg =
+		Instance.new("TextLabel")
+
+	msg.Size =
+		UDim2.new(1, -25, 1, 0)
+
+	msg.Position =
+		UDim2.fromOffset(15, 0)
+
+	msg.BackgroundTransparency = 1
+
+	msg.Text =
+		"📢  " .. message
+
+	msg.TextColor3 = TEXT
+	msg.TextSize = 16
+	msg.Font = Enum.Font.GothamBold
+	msg.TextWrapped = true
+	msg.ZIndex = 301
+	msg.Parent = notification
+
+	notification.BackgroundTransparency = 1
+	msg.TextTransparency = 1
+
+	tween(
+		notification,
+		{BackgroundTransparency = 0},
+		0.2
+	)
+
+	tween(
+		msg,
+		{TextTransparency = 0},
+		0.2
+	)
+
 	messageBox.Text = ""
 
-	task.delay(5,function()
+	playSound("Success", 0.25, 1.15)
+
+	task.delay(4, function()
 
 		if notification then
-			notification:Destroy()
+
+			tween(
+				notification,
+				{BackgroundTransparency = 1},
+				0.25
+			)
+
+			tween(
+				msg,
+				{TextTransparency = 1},
+				0.25
+			)
+
+			task.wait(0.3)
+
+			if notification then
+				notification:Destroy()
+			end
+
 		end
 
 	end)
@@ -759,11 +1664,17 @@ speedSet.MouseButton1Click:Connect(function()
 		tonumber(speedBox.Text)
 
 	if not value then
+
+		notify(
+			"Invalid WalkSpeed.",
+			RED
+		)
+
 		return
 	end
 
 	walkSpeed =
-		math.clamp(value,0,500)
+		math.clamp(value, 0, 500)
 
 	local character =
 		player.Character
@@ -777,8 +1688,14 @@ speedSet.MouseButton1Click:Connect(function()
 			humanoid.WalkSpeed =
 				walkSpeed
 		end
-
 	end
+
+	notify(
+		"WalkSpeed set to " .. walkSpeed,
+		GREEN
+	)
+
+	playSound("Success", 0.18, 1.2)
 end)
 
 ------------------------------------------------------------
@@ -791,11 +1708,17 @@ jumpSet.MouseButton1Click:Connect(function()
 		tonumber(jumpBox.Text)
 
 	if not value then
+
+		notify(
+			"Invalid JumpPower.",
+			RED
+		)
+
 		return
 	end
 
 	jumpPower =
-		math.clamp(value,0,500)
+		math.clamp(value, 0, 500)
 
 	local character =
 		player.Character
@@ -808,10 +1731,18 @@ jumpSet.MouseButton1Click:Connect(function()
 		if humanoid then
 
 			humanoid.UseJumpPower = true
-			humanoid.JumpPower = jumpPower
+			humanoid.JumpPower =
+				jumpPower
 
 		end
 	end
+
+	notify(
+		"JumpPower set to " .. jumpPower,
+		GREEN
+	)
+
+	playSound("Success", 0.18, 1.2)
 end)
 
 ------------------------------------------------------------
@@ -824,12 +1755,24 @@ flySet.MouseButton1Click:Connect(function()
 		tonumber(flyBox.Text)
 
 	if not value then
+
+		notify(
+			"Invalid Fly Speed.",
+			RED
+		)
+
 		return
 	end
 
 	flySpeed =
-		math.clamp(value,1,500)
+		math.clamp(value, 1, 500)
 
+	notify(
+		"Fly speed set to " .. flySpeed,
+		GREEN
+	)
+
+	playSound("Success", 0.18, 1.2)
 end)
 
 ------------------------------------------------------------
@@ -855,10 +1798,10 @@ local function stopFly()
 	end
 
 	flyButton.Text =
-		"🪽 FLY: OFF"
+		"🪽  FLY  •  OFF"
 
 	flyButton.BackgroundColor3 =
-		Color3.fromRGB(65,65,85)
+		Color3.fromRGB(48,48,68)
 
 end
 
@@ -903,10 +1846,12 @@ local function startFly()
 		root
 
 	flyButton.Text =
-		"🪽 FLY: ON"
+		"🪽  FLY  •  ON"
 
 	flyButton.BackgroundColor3 =
-		Color3.fromRGB(50,150,85)
+		GREEN
+
+	playSound("Success", 0.25, 1.4)
 
 	flyConnection =
 		RunService.RenderStepped:Connect(function()
@@ -1003,12 +1948,113 @@ end
 flyButton.MouseButton1Click:Connect(function()
 
 	if flying then
+
 		stopFly()
+
+		playSound("Click", 0.2, 0.8)
+
+		notify(
+			"Flight disabled.",
+			ORANGE
+		)
+
 	else
+
 		startFly()
+
+		notify(
+			"Flight enabled.",
+			GREEN
+		)
+
 	end
 
 end)
+
+------------------------------------------------------------
+-- OPEN / CLOSE ANIMATION
+------------------------------------------------------------
+
+local panelOpenSize = UDim2.fromOffset(760, 555)
+local panelClosedSize = UDim2.fromOffset(700, 500)
+
+local function openPanel()
+
+	main.Visible = true
+	openButton.Visible = false
+
+	main.Size = panelClosedSize
+
+	main.BackgroundTransparency = 0.2
+
+	tween(
+		main,
+		{
+			Size = panelOpenSize,
+			BackgroundTransparency = 0
+		},
+		0.3,
+		Enum.EasingStyle.Back
+	)
+
+	playSound("Open", 0.25, 1.15)
+end
+
+local function closePanel()
+
+	playSound("Close", 0.2, 0.85)
+
+	local t = tween(
+		main,
+		{
+			Size = panelClosedSize,
+			BackgroundTransparency = 0.2
+		},
+		0.2,
+		Enum.EasingStyle.Back,
+		Enum.EasingDirection.In
+	)
+
+	t.Completed:Connect(function()
+
+		main.Visible = false
+		openButton.Visible = true
+
+	end)
+end
+
+close.MouseButton1Click:Connect(closePanel)
+
+openButton.MouseButton1Click:Connect(function()
+
+	openPanel()
+
+end)
+
+------------------------------------------------------------
+-- RIGHTSHIFT SHORTCUT
+------------------------------------------------------------
+
+UserInputService.InputBegan:Connect(
+	function(input, processed)
+
+		if processed then
+			return
+		end
+
+		if input.KeyCode ==
+			Enum.KeyCode.RightShift then
+
+			if main.Visible then
+				closePanel()
+			else
+				openPanel()
+			end
+
+		end
+
+	end
+)
 
 ------------------------------------------------------------
 -- CHARACTER RESPAWN
@@ -1039,29 +2085,271 @@ player.CharacterAdded:Connect(function(character)
 end)
 
 ------------------------------------------------------------
--- KEYBOARD SHORTCUT
--- RightShift = Open / Close
+-- STARTUP LOADING SCREEN
 ------------------------------------------------------------
 
-UserInputService.InputBegan:Connect(
-	function(input, processed)
+local loading = Instance.new("Frame")
 
-		if processed then
-			return
+loading.Size = UDim2.fromScale(1,1)
+loading.Position = UDim2.fromScale(0,0)
+loading.BackgroundColor3 = BG
+loading.BorderSizePixel = 0
+loading.ZIndex = 1000
+loading.Parent = gui
+
+local loadingGradient = Instance.new("UIGradient")
+
+loadingGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(35,25,65)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(14,14,23)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(8,8,14)),
+})
+
+loadingGradient.Rotation = 135
+loadingGradient.Parent = loading
+
+local loadingIcon = Instance.new("TextLabel")
+
+loadingIcon.Size = UDim2.fromOffset(100,100)
+loadingIcon.Position = UDim2.new(0.5,-50,0.34,-50)
+loadingIcon.BackgroundColor3 = PURPLE
+loadingIcon.BorderSizePixel = 0
+loadingIcon.Text = "⚡"
+loadingIcon.TextSize = 45
+loadingIcon.TextColor3 = TEXT
+loadingIcon.Font = Enum.Font.GothamBold
+loadingIcon.ZIndex = 1001
+loadingIcon.Parent = loading
+
+local loadingCorner = Instance.new("UICorner")
+loadingCorner.CornerRadius = UDim.new(0, 25)
+loadingCorner.Parent = loadingIcon
+
+local loadingStroke = Instance.new("UIStroke")
+loadingStroke.Color = Color3.fromRGB(180,160,255)
+loadingStroke.Thickness = 2
+loadingStroke.Parent = loadingIcon
+
+local loadingTitle = Instance.new("TextLabel")
+
+loadingTitle.Size = UDim2.fromOffset(500,45)
+loadingTitle.Position = UDim2.new(0.5,-250,0.52,0)
+loadingTitle.BackgroundTransparency = 1
+loadingTitle.Text = "ADMIN / TROLL PANEL"
+loadingTitle.TextColor3 = TEXT
+loadingTitle.TextSize = 25
+loadingTitle.Font = Enum.Font.GothamBold
+loadingTitle.ZIndex = 1001
+loadingTitle.Parent = loading
+
+local loadingSubtitle = Instance.new("TextLabel")
+
+loadingSubtitle.Size = UDim2.fromOffset(500,30)
+loadingSubtitle.Position = UDim2.new(0.5,-250,0.58,0)
+loadingSubtitle.BackgroundTransparency = 1
+loadingSubtitle.Text = "Initializing enhanced interface..."
+loadingSubtitle.TextColor3 = SUBTEXT
+loadingSubtitle.TextSize = 13
+loadingSubtitle.Font = Enum.Font.Gotham
+loadingSubtitle.ZIndex = 1001
+loadingSubtitle.Parent = loading
+
+------------------------------------------------------------
+-- LOADING BAR
+------------------------------------------------------------
+
+local barBackground = Instance.new("Frame")
+
+barBackground.Size = UDim2.fromOffset(330,8)
+barBackground.Position = UDim2.new(0.5,-165,0.65,0)
+barBackground.BackgroundColor3 = Color3.fromRGB(38,38,53)
+barBackground.BorderSizePixel = 0
+barBackground.ZIndex = 1001
+barBackground.Parent = loading
+
+local barCorner = Instance.new("UICorner")
+barCorner.CornerRadius = UDim.new(1,0)
+barCorner.Parent = barBackground
+
+local bar = Instance.new("Frame")
+
+bar.Size = UDim2.new(0,0,1,0)
+bar.BackgroundColor3 = PURPLE
+bar.BorderSizePixel = 0
+bar.ZIndex = 1002
+bar.Parent = barBackground
+
+local barGradient = Instance.new("UIGradient")
+
+barGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(85,65,255)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(150,100,255)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(70,150,255)),
+})
+
+barGradient.Parent = bar
+
+local barCorner2 = Instance.new("UICorner")
+barCorner2.CornerRadius = UDim.new(1,0)
+barCorner2.Parent = bar
+
+------------------------------------------------------------
+-- LOADING TEXT
+------------------------------------------------------------
+
+local percent = Instance.new("TextLabel")
+
+percent.Size = UDim2.fromOffset(200,25)
+percent.Position = UDim2.new(0.5,-100,0.69,0)
+percent.BackgroundTransparency = 1
+percent.Text = "0%"
+percent.TextColor3 = SUBTEXT
+percent.TextSize = 11
+percent.Font = Enum.Font.GothamBold
+percent.ZIndex = 1001
+percent.Parent = loading
+
+------------------------------------------------------------
+-- LOADING ANIMATION
+------------------------------------------------------------
+
+task.spawn(function()
+
+	playSound("Open", 0.2, 0.75)
+
+	for i = 0, 100 do
+
+		bar.Size =
+			UDim2.new(i / 100, 0, 1, 0)
+
+		percent.Text =
+			i .. "%"
+
+		if i == 25 then
+			loadingSubtitle.Text =
+				"Building interface..."
+		elseif i == 50 then
+			loadingSubtitle.Text =
+				"Preparing controls..."
+		elseif i == 75 then
+			loadingSubtitle.Text =
+				"Loading player system..."
+		elseif i == 90 then
+			loadingSubtitle.Text =
+				"Almost ready..."
 		end
 
-		if input.KeyCode ==
-			Enum.KeyCode.RightShift then
+		task.wait(0.012)
 
-			main.Visible =
-				not main.Visible
-
-			openButton.Visible =
-				not main.Visible
-
-		end
 	end
-)
+
+	loadingSubtitle.Text =
+		"Ready."
+
+	task.wait(0.35)
+
+	tween(
+		loadingIcon,
+		{
+			Size = UDim2.fromOffset(115,115),
+			Position = UDim2.new(0.5,-57.5,0.34,-57.5)
+		},
+		0.2,
+		Enum.EasingStyle.Back
+	)
+
+	task.wait(0.15)
+
+	tween(
+		loading,
+		{
+			BackgroundTransparency = 1
+		},
+		0.45
+	)
+
+	tween(
+		loadingIcon,
+		{
+			TextTransparency = 1,
+			BackgroundTransparency = 1
+		},
+		0.35
+	)
+
+	tween(
+		loadingTitle,
+		{
+			TextTransparency = 1
+		},
+		0.35
+	)
+
+	tween(
+		loadingSubtitle,
+		{
+			TextTransparency = 1
+		},
+		0.35
+	)
+
+	tween(
+		barBackground,
+		{
+			BackgroundTransparency = 1
+		},
+		0.35
+	)
+
+	tween(
+		bar,
+		{
+			BackgroundTransparency = 1
+		},
+		0.35
+	)
+
+	tween(
+		percent,
+		{
+			TextTransparency = 1
+		},
+		0.35
+	)
+
+	task.wait(0.5)
+
+	loading:Destroy()
+
+	main.Visible = true
+
+	main.Size =
+		UDim2.fromOffset(680, 490)
+
+	tween(
+		main,
+		{
+			Size = UDim2.fromOffset(760,555)
+		},
+		0.4,
+		Enum.EasingStyle.Back
+	)
+
+	notify(
+		"⚡ Admin panel ready!",
+		PURPLE
+	)
+
+	playSound("Success", 0.25, 1.2)
+
+end)
+
+------------------------------------------------------------
+-- INITIAL STATE
+------------------------------------------------------------
+
+main.Visible = false
+openButton.Visible = false
 
 ------------------------------------------------------------
 -- CLEANUP
@@ -1079,6 +2367,4 @@ script.Destroying:Connect(function()
 
 end)
 
-print(
-	"ONE SCRIPT ADMIN PANEL LOADED"
-)
+print("⚡ ONE SCRIPT ADMIN PANEL - ENHANCED EDITION LOADED")
